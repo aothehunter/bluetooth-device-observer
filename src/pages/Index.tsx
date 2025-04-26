@@ -3,10 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import { BluetoothDevice } from '@/types/bluetooth';
 import { 
+  initializeBluetooth,
   getConnectedDevices, 
-  toggleDeviceConnection, 
-  renameDevice,
-  refreshDeviceBatteryLevels 
+  scanForDevices,
+  toggleDeviceConnection,
+  getBatteryLevel
 } from '@/services/bluetoothService';
 import Header from '@/components/Header';
 import DeviceList from '@/components/DeviceList';
@@ -17,11 +18,40 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
+  useEffect(() => {
+    initBluetooth();
+  }, []);
+
+  const initBluetooth = async () => {
+    try {
+      await initializeBluetooth();
+      await loadDevices();
+    } catch (error) {
+      toast({
+        title: "Bluetooth Error",
+        description: "Failed to initialize Bluetooth. Please ensure Bluetooth is enabled.",
+        variant: "destructive"
+      });
+      setIsLoading(false);
+    }
+  };
+
   const loadDevices = async () => {
     setIsLoading(true);
     try {
-      const fetchedDevices = await getConnectedDevices();
-      setDevices(fetchedDevices);
+      const connectedDevices = await getConnectedDevices();
+      setDevices(connectedDevices);
+      
+      // Start scanning for new devices
+      await scanForDevices((newDevice) => {
+        setDevices(prev => {
+          const exists = prev.some(d => d.id === newDevice.id);
+          if (!exists) {
+            return [...prev, newDevice];
+          }
+          return prev;
+        });
+      });
     } catch (error) {
       toast({
         title: "Error",
@@ -35,25 +65,11 @@ const Index = () => {
 
   const handleRefresh = async () => {
     toast({
-      title: "Refreshing",
-      description: "Scanning for devices...",
+      title: "Scanning",
+      description: "Scanning for Bluetooth devices...",
     });
     
-    try {
-      const updatedDevices = await refreshDeviceBatteryLevels();
-      setDevices(updatedDevices);
-      
-      toast({
-        title: "Refresh complete",
-        description: `Found ${updatedDevices.length} devices.`,
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to refresh devices.",
-        variant: "destructive"
-      });
-    }
+    await loadDevices();
   };
 
   const handleToggleConnection = async (deviceId: string) => {
@@ -66,13 +82,28 @@ const Index = () => {
         description: targetDevice?.customName || targetDevice?.name,
       });
       
-      const updatedDevices = await toggleDeviceConnection(deviceId);
-      setDevices(updatedDevices);
+      const isConnected = await toggleDeviceConnection(deviceId);
       
-      const newStatus = updatedDevices.find(d => d.id === deviceId)?.connected 
-        ? 'Connected to' 
-        : 'Disconnected from';
+      // Update device list with new connection status
+      setDevices(prev => prev.map(device => {
+        if (device.id === deviceId) {
+          return { ...device, connected: isConnected };
+        }
+        return device;
+      }));
+
+      // If connected, try to get battery level
+      if (isConnected) {
+        const batteryLevel = await getBatteryLevel(deviceId);
+        setDevices(prev => prev.map(device => {
+          if (device.id === deviceId) {
+            return { ...device, batteryLevel };
+          }
+          return device;
+        }));
+      }
       
+      const newStatus = isConnected ? 'Connected to' : 'Disconnected from';
       toast({
         title: `${newStatus} device`,
         description: targetDevice?.customName || targetDevice?.name,
@@ -87,28 +118,19 @@ const Index = () => {
     }
   };
 
-  const handleRename = async (deviceId: string, newName: string) => {
-    try {
-      const updatedDevices = await renameDevice(deviceId, newName);
-      setDevices(updatedDevices);
-      
-      toast({
-        title: "Device renamed",
-        description: `Device has been renamed to "${newName || 'default name'}"`,
-      });
-    } catch (error) {
-      toast({
-        title: "Rename Error",
-        description: "Failed to rename device.",
-        variant: "destructive"
-      });
-    }
+  const handleRename = (deviceId: string, newName: string) => {
+    setDevices(prev => prev.map(device => {
+      if (device.id === deviceId) {
+        return { ...device, customName: newName || undefined };
+      }
+      return device;
+    }));
+    
+    toast({
+      title: "Device renamed",
+      description: `Device has been renamed to "${newName || 'default name'}"`,
+    });
   };
-
-  useEffect(() => {
-    loadDevices();
-    // In a real app, we'd set up event listeners for Bluetooth state changes here
-  }, []);
 
   return (
     <div className="flex flex-col min-h-screen bg-windows-lightGray">

@@ -11,7 +11,8 @@ export const initializeBluetooth = async () => {
 
 export const getConnectedDevices = async (): Promise<BluetoothDevice[]> => {
   try {
-    const devices = await BleClient.getDevices();
+    // The error is here - BleClient.getDevices() requires a services array parameter
+    const devices = await BleClient.getDevices([BATTERY_SERVICE]);
     return devices.map(convertBleDeviceToBluetoothDevice);
   } catch (error) {
     console.error('Failed to get devices:', error);
